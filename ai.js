@@ -126,7 +126,7 @@ $('#ai-run').onclick=async()=>{
   if(aiNeedsReload){aiStatus('Önceki model işlemi durduruldu. Modeli tekrar kullanmak için bu dosya sekmesini kapatıp yeniden aç.');return;}
   if(!aiEngine){aiStatus('Bu komut için önce “Yapay zekâyı hazırla”ya bas.');return;}
   aiBusy=true;$('#ai-run').disabled=true;$('#ai-load').disabled=true;$('#ai-stop').hidden=false;$('#ai-test').disabled=true;
-  const job={engine:aiEngine,model:aiLoadedModel,closed:false,chars:0,started:Date.now()};
+  const job={engine:aiEngine,model:aiLoadedModel,closed:false,chars:0,phase:"İstek hazırlanıyor",started:Date.now()};
   let ticker,deadline;
   try{
     const examples=t.rows.filter(r=>Object.values(r.values).some(Boolean)).slice(0,1).map(r=>t.columns.map(c=>(r.values[c.id]||'').slice(0,80)));
@@ -151,8 +151,8 @@ $('#ai-run').onclick=async()=>{
       const compactContext={today,columns:t.columns.map(c=>c.meaning?.trim()||c.name)};
       const partialExample=shortEntry&&t.columns.length===4&&/müşteri/i.test(t.columns[0].meaning||t.columns[0].name)&&/ürün/i.test(t.columns[1].meaning||t.columns[1].name)&&/miktar/i.test(t.columns[2].meaning||t.columns[2].name)&&/tutar/i.test(t.columns[3].meaning||t.columns[3].name)?[{role:'user',content:'Deniz mağazaya gitti.'},{role:'assistant',content:'{"rows":[["Deniz","","",""]]}'},{role:'user',content:'Ece dükkana gitti. 7 kg muz aldı.'},{role:'assistant',content:'{"rows":[["Ece","muz","7 kg",""]]}'}]:[];
       const messages=diagnostic?[{role:'user',content:'Reply exactly OK. /no_think'}]:shortEntry?[{role:'system',content:SHORT_ENTRY_PROMPT},...partialExample,{role:'user',content:JSON.stringify({context:compactContext,request:text})}]:[{role:'system',content:entryMode?ENTRY_PROMPT:AI_PROMPT+'\nOutput JSON must follow this shape: '+JSON.stringify(shape)},...examplesForEntry,{role:'user',content:JSON.stringify({context,current_request_to_extract:text,request:text})}];
-      job.inputChars=messages.reduce((sum,m)=>sum+m.content.length,0);
-      const stream=await job.engine.chat.completions.create({messages,temperature:0,max_tokens:diagnostic?8:entryMode?200:600,stream:true,stream_options:{include_usage:true},extra_body:{enable_thinking:false}});
+      job.phase="Talimat hazırlanıyor";job.inputChars=messages.reduce((sum,m)=>sum+m.content.length,0);
+      job.phase="Model isteği başlatılıyor";const stream=await job.engine.chat.completions.create({messages,temperature:0,max_tokens:diagnostic?8:entryMode?200:600,stream:true,stream_options:{include_usage:true},extra_body:{enable_thinking:false}});
       let content='',finish;
       for await(const chunk of stream){if(job.closed)break;const piece=chunk.choices?.[0]?.delta?.content||'';if(piece&&job.firstMs===undefined)job.firstMs=Date.now()-job.started;if(chunk.usage)job.usage=chunk.usage;content+=piece;job.content=content;job.chars+=piece.length;finish=chunk.choices?.[0]?.finish_reason||finish;progress();}
       if(job.closed)throw Error('İşlem durduruldu.');
@@ -169,9 +169,10 @@ $('#ai-run').onclick=async()=>{
     if(active!==tabId||JSON.stringify(current())!==snapshot)throw Error('İşlem sırasında tablo değişti. Komutu tekrar çalıştır.');
     aiPlan={plan,tabId,snapshot,evidence:{request:text,modelResponse:content,beforeChecks:beforeChecks,afterChecks:structuredClone(plan)},warnings:[...missingFactWarnings,...entryWarnings(plan,t,text)],metrics:{model:job.model,seconds:Math.round((Date.now()-job.started)/100)/10,firstSeconds:job.firstMs===undefined?null:Math.round(job.firstMs/100)/10,inputChars:job.inputChars,outputChars:job.chars,tokens:job.usage?.completion_tokens,shortEntry:job.shortEntry}};showPlan();const resultLabel=plan.action==='clarify'?'Model açıklama istiyor':plan.action==='query'?'Sorgu sonucu hazır':'Öneri hazır';aiStatus(`${resultLabel} · ${Math.round((Date.now()-job.started)/1000)} sn. Açılan sonuç penceresini kontrol et.`);
   }catch(e){
+    job.errorName=e.name||"Error";job.errorStack=String(e.stack||e.message).slice(0,6000);job.fatal=/disposed|deleted object|Tokenizer\*|device.lost|device.hung|GrammarMatcher/i.test(e.message||"");
     if(diagnostic)showSpeedReport(job,'',e.message);else if(job.content)showRejectedResponse(job.content,e.message);
     console.error(e);
-    if(/disposed|device.lost|device.hung|GrammarMatcher/i.test(e.message||'')){aiNeedsReload=true;aiEngine=null;aiStatus('Model motoru durdu. Tablo kayıtları değiştirilmedi. Tarayıcıyı tamamen kapatıp yeniden aç. Ayrıntı: '+e.message);}
+    if(job.fatal){aiNeedsReload=true;aiEngine=null;aiStatus('Model motoru durdu. Tablo kayıtları değiştirilmedi. Tarayıcıyı tamamen kapatıp yeniden aç. Ayrıntı: '+e.message);}
     else aiStatus('İşlem tamamlanamadı: '+e.message);
   }finally{
     job.closed=true;clearInterval(ticker);clearTimeout(deadline);aiStopRequest=null;aiBusy=false;
@@ -193,7 +194,7 @@ function checkProbe(content){const clean=String(content).replace(/<think>[\s\S]*
 function showSpeedReport(job,content,result){
   const info=aiAdapter?.info||{},box=$('#ai-result');box.replaceChildren();box.hidden=false;openOutput('Model testi');
   box.append(el('p','Kısa model testi · Tablo ve uzun yönerge kullanılmadı. Bu test kayıt eklemez.'));
-  const pre=el('pre',JSON.stringify({sonuc:result,motor:'0.2.82',model:job.model||'Ölçülemedi',beklenen_yanit:'OK',yanit_dogrulandi:checkProbe(content),tarayici:navigator.userAgent||'Bilinmiyor',gpu:info.description||info.vendor||'Tarayıcı paylaşmadı',ilk_yanit_saniye:job.firstMs===undefined?'Yanıt gelmedi':Math.round(job.firstMs/100)/10,toplam_saniye:Math.round((Date.now()-job.started)/100)/10,alinan_karakter:job.chars,uretilen_token:job.usage?.completion_tokens??'Ölçülemedi',model_yaniti:content.slice(0,200)},null,2));
+  const pre=el('pre',JSON.stringify({uygulama:'0.4.7',asama:job.phase||'Bilinmiyor',hata_turu:job.errorName||null,hata_izi:job.errorStack||null,motor_yeniden_baslatilmali:Boolean(job.fatal)||aiNeedsReload,shader_f16:aiAdapter?.features?.has('shader-f16')??null,gpu_sinirlari:{maxBufferSize:aiAdapter?.limits?.maxBufferSize??null,maxStorageBufferBindingSize:aiAdapter?.limits?.maxStorageBufferBindingSize??null},sonuc:result,motor:'0.2.82',model:job.model||'Ölçülemedi',beklenen_yanit:'OK',yanit_dogrulandi:checkProbe(content),tarayici:navigator.userAgent||'Bilinmiyor',gpu:info.description||info.vendor||'Tarayıcı paylaşmadı',ilk_yanit_saniye:job.firstMs===undefined?'Yanıt gelmedi':Math.round(job.firstMs/100)/10,toplam_saniye:Math.round((Date.now()-job.started)/100)/10,alinan_karakter:job.chars,uretilen_token:job.usage?.completion_tokens??'Ölçülemedi',model_yaniti:content.slice(0,200)},null,2));
   box.append(pre);
 }
 $('#ai-test').onclick=()=>{if(aiBusy)return;aiDiagnosticRequested=true;return $('#ai-run').onclick();};
