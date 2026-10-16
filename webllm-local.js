@@ -1,4 +1,6 @@
 (function(){
+globalThis.VeriModelDiagnostics=[];
+function recordVeriGPU(type,info){const events=globalThis.VeriModelDiagnostics;events.push({type,reason:String(info?.reason||""),message:String(info?.message||info?.error?.message||"").slice(0,1500)});if(events.length>8)events.shift();}
 function normalizeVeriArtifact(data,storetype){
   if(typeof storetype!=='string'||storetype.toLowerCase()!=='json')return data;
   let parsed=data;
@@ -6424,11 +6426,13 @@ fn fragment_clear(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 		       */
 		      initWebGPU(device) {
 		          device.addEventListener("uncapturederror", (event) => {
-		              console.error("A WebGPU error was not captured: ", event);
+		              recordVeriGPU("uncaptured-error",event);
+console.error("A WebGPU error was not captured: ", event);
 		          });
 		          device.lost.then((info) => {
 		              if (this.deviceLostIsError) {
-		                  console.error("Device lost, calling Instance.dispose(). Please initialize again. ", info);
+		                  recordVeriGPU("runtime-device-lost",info);
+console.error("Device lost, calling Instance.dispose(). Please initialize again. ", info);
 		                  this.dispose();
 		              }
 		          });
@@ -11114,6 +11118,7 @@ class MLCEngine {
             let deviceLostInReload = false;
             gpuDetectOutput.device.lost.then((info) => {
                 if (this.deviceLostIsError) {
+                    recordVeriGPU("engine-device-lost",info);
                     log.error(`Device was lost. This can happen due to insufficient memory or other GPU constraints. ` +
                         `Detailed error: ${info}. Please try to reload WebLLM with a less resource-intensive model.`);
                     this.unload();
