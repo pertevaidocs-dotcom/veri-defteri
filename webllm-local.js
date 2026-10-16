@@ -3830,25 +3830,25 @@ function requireLib$2 () {
 		   *   `device.destroy()` with `device.lost.then()`.
 		   */
 		  function tryCreateBuffer(device, descriptor) {
-		      device.pushErrorScope("out-of-memory");
-		      device.pushErrorScope("validation");
-		      device.pushErrorScope("internal");
-		      const buffer = device.createBuffer(descriptor);
-		      device.popErrorScope().then((error) => { if (error) {
-		          device.destroy();
-		          console.error(error);
-		      } });
-		      device.popErrorScope().then((error) => { if (error) {
-		          device.destroy();
-		          console.error(error);
-		      } });
-		      device.popErrorScope().then((error) => { if (error) {
-		          device.destroy();
-		          console.error(error);
-		      } });
-		      return buffer;
-		  }
-		  const canvasRenderWGSL = `
+  const report=(type,error)=>{
+    recordVeriGPU(type,{reason:error?.name||'GPUError',message:error?.message||String(error)});
+    const events=globalThis.VeriModelDiagnostics;
+    Object.assign(events[events.length-1],{buffer_size:descriptor.size,buffer_usage:descriptor.usage,buffer_label:String(descriptor.label||'').slice(0,200)});
+  };
+  device.pushErrorScope('out-of-memory');
+  device.pushErrorScope('validation');
+  device.pushErrorScope('internal');
+  let buffer;
+  try { buffer=device.createBuffer(descriptor); }
+  catch(error){report('buffer-create-threw',error);throw error;}
+  for(const kind of ['internal','validation','out-of-memory']){
+    device.popErrorScope().then(error=>{
+      if(error){report('buffer-'+kind,error);device.destroy();console.error(error);}
+    }).catch(error=>report('buffer-scope-error',error));
+  }
+  return buffer;
+}
+  const canvasRenderWGSL = `
 @group(0) @binding(0) var my_sampler : sampler;
 @group(0) @binding(1) var my_texture : texture_2d<f32>;
 
