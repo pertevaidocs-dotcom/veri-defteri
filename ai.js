@@ -71,13 +71,31 @@ function normalizeShortEntry(raw,t){
   }
   return {rows:[row],meanings:[]};
 }
+function monetaryEvidence(request){
+  const text=String(request).toLocaleLowerCase('tr').replace(/ı/g,'i').normalize('NFD').replace(/\p{M}/gu,'');
+  const numbers=[];const amount='(\\d+(?:[.,]\\d+)*)';
+  const currency='(?:tl|try|lira(?:ya|dan|lik|nin)?|turk lirasi|usd|dolar(?:a|dan)?|eur|euro|avro|gbp|sterlin)';
+  for(const pattern of [new RegExp(amount+'\\s*(?:'+currency+'|[₺$€£])(?=$|[^a-z])','g'),new RegExp('[₺$€£]\\s*'+amount,'g'),new RegExp('(?:fiyat(?:i|ina)?|tutar(?:i|ina)?|bedel(?:i|ine)?)\\s*[:=]?\\s*'+amount,'g')]){
+    for(const match of text.matchAll(pattern)){const value=numeric(match[1]);if(value!==null)numbers.push(value);}
+  }
+  const hasCue=/[₺$€£]|\b(?:tl|try|lira|usd|dolar|eur|euro|avro|gbp|sterlin|fiyat|tutar|bedel)/.test(text);
+  return {numbers,hasCue};
+}
 function removeUnsupportedFacts(plan,t,request){
   const warnings=[];if(plan.action!=='append')return warnings;
+  const money=monetaryEvidence(request);
   const source=sourceText(request).replace(/\s+/g,' ').trim();
   const hasNumbers=/\d/.test(source)||/(?:^| )(?:sifir|bir|iki|uc|dort|bes|alti|yedi|sekiz|dokuz|on|yirmi|otuz|kirk|elli|altmis|yetmis|seksen|doksan|yuz|bin|milyon|yarim|ceyrek|bucuk)(?: |$)/.test(source);
   plan.rows.forEach(row=>row.forEach((value,i)=>{
     if(!value.trim())return;
     const label=t.columns[i]?.meaning||plan.meanings[i]||t.columns[i]?.name||'';
+    if(/tutar|fiyat|bedel|price|cost|total|amount/i.test(label)){
+      const proposedNumber=value.match(/\d+(?:[.,]\d+)*/)?.[0];const proposed=proposedNumber===undefined?null:numeric(proposedNumber);
+      if(!money.hasCue||(proposed!==null&&money.numbers.length&&!money.numbers.includes(proposed))){
+        row[i]='';warnings.push('Cümlede bu tutarı destekleyen fiyat bilgisi yok. Modelin “'+value+'” önerisi '+label+' alanından çıkarıldı; alan boş bırakıldı.');return;
+      }
+      if(proposed!==null&&!money.numbers.length){row[i]='';warnings.push('“'+value+'” tutarı cümleden sayısal olarak doğrulanamadı. '+label+' alanı boş bırakıldı; gerekirse elle gir.');return;}
+    }
     if(/miktar|tutar|fiyat|adet|quantity|amount|price/i.test(label)&&!hasNumbers&&/\d/.test(value)){
       row[i]='';warnings.push('Cümlede sayısal bilgi yok. Modelin “'+value+'” önerisi '+label+' alanından çıkarıldı; alan boş bırakıldı.');return;
     }
@@ -196,7 +214,7 @@ function checkProbe(content){const clean=String(content).replace(/<think>[\s\S]*
 function showSpeedReport(job,content,result){
   const info=aiAdapter?.info||{},box=$('#ai-result');box.replaceChildren();box.hidden=false;openOutput('Model testi');
   box.append(el('p','Kısa model testi · Tablo ve uzun yönerge kullanılmadı. Bu test kayıt eklemez.'));
-  const pre=el('pre',JSON.stringify({uygulama:'0.4.8',calisma_ayarlari:aiRuntimeOptions||null,gpu_olaylari:globalThis.VeriModelDiagnostics||[],asama:job.phase||'Bilinmiyor',hata_turu:job.errorName||null,hata_izi:job.errorStack||null,motor_yeniden_baslatilmali:Boolean(job.fatal)||aiNeedsReload,shader_f16:aiAdapter?.features?.has('shader-f16')??null,gpu_sinirlari:{maxBufferSize:aiAdapter?.limits?.maxBufferSize??null,maxStorageBufferBindingSize:aiAdapter?.limits?.maxStorageBufferBindingSize??null},sonuc:result,motor:'0.2.82',model:job.model||'Ölçülemedi',beklenen_yanit:'OK',yanit_dogrulandi:checkProbe(content),tarayici:navigator.userAgent||'Bilinmiyor',gpu:info.description||info.vendor||'Tarayıcı paylaşmadı',ilk_yanit_saniye:job.firstMs===undefined?'Yanıt gelmedi':Math.round(job.firstMs/100)/10,toplam_saniye:Math.round((Date.now()-job.started)/100)/10,alinan_karakter:job.chars,uretilen_token:job.usage?.completion_tokens??'Ölçülemedi',model_yaniti:content.slice(0,200)},null,2));
+  const pre=el('pre',JSON.stringify({uygulama:'0.4.9',calisma_ayarlari:aiRuntimeOptions||null,gpu_olaylari:globalThis.VeriModelDiagnostics||[],asama:job.phase||'Bilinmiyor',hata_turu:job.errorName||null,hata_izi:job.errorStack||null,motor_yeniden_baslatilmali:Boolean(job.fatal)||aiNeedsReload,shader_f16:aiAdapter?.features?.has('shader-f16')??null,gpu_sinirlari:{maxBufferSize:aiAdapter?.limits?.maxBufferSize??null,maxStorageBufferBindingSize:aiAdapter?.limits?.maxStorageBufferBindingSize??null},sonuc:result,motor:'0.2.82',model:job.model||'Ölçülemedi',beklenen_yanit:'OK',yanit_dogrulandi:checkProbe(content),tarayici:navigator.userAgent||'Bilinmiyor',gpu:info.description||info.vendor||'Tarayıcı paylaşmadı',ilk_yanit_saniye:job.firstMs===undefined?'Yanıt gelmedi':Math.round(job.firstMs/100)/10,toplam_saniye:Math.round((Date.now()-job.started)/100)/10,alinan_karakter:job.chars,uretilen_token:job.usage?.completion_tokens??'Ölçülemedi',model_yaniti:content.slice(0,200)},null,2));
   box.append(pre);
 }
 $('#ai-test').onclick=()=>{if(aiBusy)return;aiDiagnosticRequested=true;return $('#ai-run').onclick();};
