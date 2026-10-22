@@ -62,6 +62,14 @@ function evaluateRouting(content,targets,request){
     const spec=targets[i],t=db.tabs.find(t=>t.id===spec.id);
     if(!t||JSON.stringify(t)!==spec.snapshot)throw Error('Karşılaştırma sırasında bir tablo değişti. Yeniden dene.');
     if(!Array.isArray(values)||values.length!==spec.columns.length||values.some(v=>typeof v!=='string'||v.length>2000))throw Error('Model tablo alanlarını eşleştiremedi. Hiçbir kayıt değiştirilmedi.');
+    // Airport/flight fields need journey evidence, not merely a city and a price.
+    if(t.kind==='flights'&&!/uçak|uçuş|uçtum|uçtuk|bilet|havaliman|havaalan|kalkış|varış|ekonomi|business|gidiş|dönüş/iu.test(request)&&!/\p{L}+['’]?(?:dan|den|tan|ten)\s+\p{L}+['’]?(?:a|e|ya|ye)(?:\s|[.,]|$)/iu.test(request))return;
+    if(t.kind==='hotels'){
+      values=[...values];
+      const nights=request.match(/\b\d+(?:[.,]\d+)?\s*gece\b/iu)?.[0]||'';
+      const nightly=request.match(/(?:gecelik|geceliği|gece başına|gecesi|geceye)\s*(\d+(?:[.,]\d+)*\s*(?:TL|TRY|₺|lira|dolar|USD|EUR|euro|€|GBP|sterlin))/iu)?.[1]||'';
+      spec.columns.forEach((c,j)=>{if(/gecelik/i.test(c.name))values[j]=nightly;else if(/gece/i.test(c.name))values[j]=nights;});
+    }
     let row=Array(t.columns.length).fill('');
     spec.columns.forEach((column,j)=>{
       let value=values[j].trim();if(!value)return;
