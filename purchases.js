@@ -4,6 +4,17 @@ const PURCHASE_PROMPT='Extract purchases from Turkish text. JSON only: {"rows":[
 function localDay(date=new Date()){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
 function makePurchases(){return {id:id(),name:'Alışverişler',kind:'purchases',columns:PURCHASE_HEADERS.map(name=>({id:id(),name,meaning:name})),rows:Array.from({length:8},blank)};}
 function ensurePurchases(){let tab=db.tabs.find(t=>t.kind==='purchases');if(!tab){tab=makePurchases();db.tabs.unshift(tab);}return tab;}
+function ensureUnmatched(){let tab=db.tabs.find(t=>t.kind==='unmatched');if(!tab){tab={id:id(),name:'Eşleşmeyenler',kind:'unmatched',columns:[{id:id(),name:'Cümle',meaning:'Cümle'}],rows:[]};db.tabs.push(tab);}return tab;}
+function parsePurchaseResponse(content){
+  try{return parseAIResponse(content);}catch(error){
+    // Only recover the exact empty-row typo observed on-device. No nonempty
+    // values, additional fields, prose or truncated output may be repaired.
+    let text=String(content).replace(/<think>[\s\S]*?<\/think>/g,'').trim();
+    const fence=text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);if(fence)text=fence[1].trim();
+    if(/^\{\s*"rows"\s*:\s*\[\s*\[\s*""(?:\s*,\s*""){0,5}\s*\]\s*\]\s*"?\s*\}\s*$/.test(text))return {rows:[['','','','']]};
+    throw error;
+  }
+}
 function purchaseDate(request,now=new Date()){
   const text=request.toLocaleLowerCase('tr'),day=new Date(now.getFullYear(),now.getMonth(),now.getDate());
   const offset=/\bevvelsi\s+gün\b/u.test(text)?-2:/(^|\s)dün(?=\s|[.,]|$)/u.test(text)?-1:/(^|\s)yarın(?=\s|[.,]|$)/u.test(text)?1:/(^|\s)bugün(?=\s|[.,]|$)/u.test(text)?0:null;
@@ -17,6 +28,7 @@ function purchaseDate(request,now=new Date()){
   return {value:localDay(now),explicit:false};
 }
 function purchaseRows(raw,request,now=new Date()){
+  if(Array.isArray(raw?.rows)&&raw.rows.length===1&&Array.isArray(raw.rows[0])&&raw.rows[0].length>=1&&raw.rows[0].length<=6&&raw.rows[0].every(v=>v===''))raw={rows:[['','','','']]};
   if(!raw||!Array.isArray(raw.rows)||raw.rows.length!==1||!Array.isArray(raw.rows[0])||raw.rows[0].length!==4||raw.rows[0].some(v=>typeof v!=='string'))throw Error('Bu sürümde her girişte tek alışveriş cümlesi kullan. Model dört alan döndürmeli. Hiçbir kayıt değiştirilmedi.');
   const row=raw.rows[0].map(v=>v.trim()),date=purchaseDate(request,now),source=sourceText(request);
   // Only accept product words grounded in the current request, never a previous row.
