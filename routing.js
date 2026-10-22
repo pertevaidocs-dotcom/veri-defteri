@@ -12,6 +12,15 @@ function unwrapRoutingResponse(raw){
   if(raw&&Object.keys(raw).length===1&&raw.empty_response&&Object.keys(raw.empty_response).length===1&&Array.isArray(raw.empty_response.rows)&&raw.empty_response.rows.length===1&&Array.isArray(raw.empty_response.rows[0])&&raw.empty_response.rows[0].every(v=>v===''))return raw.empty_response;
   return raw;
 }
+function normalizeRoutingRow(raw,width){
+  if(!Array.isArray(raw?.rows)||!raw.rows.length||raw.rows.length>10)throw Error('Model tek bir kayıt satırı döndürmedi.');
+  const rows=raw.rows.map(row=>{
+    if(!Array.isArray(row)||row.some(v=>typeof v!=='string')||row.length<width||row.slice(width).some(v=>v.trim()))throw Error('Model hücre sayısını eşleştiremedi; dolu alanlar atılmadı.');
+    return row.slice(0,width).map(v=>v.trim());
+  });
+  if(rows.some(row=>JSON.stringify(row)!==JSON.stringify(rows[0])))throw Error('Model birden fazla farklı kayıt döndürdü. Bu girişte tek kayıt kullan.');
+  return rows[0];
+}
 async function generateRouting(job,targets,request,progress){
   const tables=[];let tokens=0;job.inputChars=0;
   for(let i=0;i<targets.length;i++){
@@ -28,8 +37,7 @@ async function generateRouting(job,targets,request,progress){
     }
     if(job.closed)throw Error('İşlem durduruldu.');
     if(finish==='length')throw Error(spec.name+' yanıtı tamamlanamadı.');
-    const raw=unwrapRoutingResponse(parsePurchaseResponse(content)),row=raw?.rows?.[0];
-    if(!Array.isArray(raw?.rows)||raw.rows.length!==1||!Array.isArray(row)||row.length!==spec.columns.length||row.some(v=>typeof v!=='string'))throw Error(spec.name+' için model geçerli hücre değerleri döndürmedi.');
+    const raw=unwrapRoutingResponse(parsePurchaseResponse(content)),mapped=normalizeShortEntry(raw,{columns:spec.columns.map(c=>({name:c.name}))}),row=normalizeRoutingRow(mapped,spec.columns.length);
     if(row.some(v=>/^(?:cell|date|product|quantity|total amount)$/i.test(v.trim()))||row.every((v,j)=>normalized(v)===normalized(spec.columns[j].name)))throw Error(spec.name+' için model değerler yerine şablon veya başlık kopyaladı.');
     tables.push(row);
   }
