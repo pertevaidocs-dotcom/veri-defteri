@@ -1,5 +1,4 @@
 'use strict';
-const ROUTING_PROMPT='Extract facts from the Turkish sentence into ONE table. Return JSON with rows: exactly one array of strings in heading order. Only sentence VALUES, never heading names or template words. Missing values="". Never invent or copy facts. Kilograms are not hotel nights. Airfare is not a hotel nightly rate. A destination is not a purchased product. If unrelated, return empty strings for every heading. /no_think';
 function ensureTravelTables(){
   for(const [kind,name,headers] of [['hotels','Oteller',['Şehir','Otel','Kalınan gece','Gecelik tutar']],['flights','Uçuşlar',['Kalkış','Varış','Bilet türü','Fiyat']]]){
     if(!db.tabs.some(t=>t.kind===kind))db.tabs.push({id:id(),kind,name,columns:headers.map(name=>({id:id(),name,meaning:name})),rows:Array.from({length:8},blank)});
@@ -8,7 +7,11 @@ function ensureTravelTables(){
 function routingTargets(){return db.tabs.filter(t=>t.kind!=='unmatched'&&t.columns.length>=2&&!t.columns.some(c=>/^Başlık\s+\d+$/i.test(c.name))).map(t=>({id:t.id,name:t.name,snapshot:JSON.stringify(t),columns:t.columns.map((c,i)=>({index:i,name:c.name})).filter(c=>t.kind==='purchases'?c.index<4:!isAuditHeading(c.name))})).filter(t=>t.columns.length>=2);}
 function isAuditHeading(name){return /^(?:kayıt tarihi|orijinal cümle|cümle)$/iu.test(name.trim());}
 function isDateHeading(name){return /tarih|date/iu.test(name);}
-function routingMessages(targets,request){const t=targets[0];return [{role:'system',content:ROUTING_PROMPT},{role:'user',content:JSON.stringify({table:t.name,headings:t.columns.map(c=>c.name),sentence:request,empty_response:{rows:[t.columns.map(()=>'')]}})}];}
+function routingMessages(targets,request){const t=targets[0],table=db.tabs.find(tab=>tab.id===t.id);return [{role:'system',content:table?.kind==='purchases'?PURCHASE_PROMPT:SHORT_ENTRY_PROMPT},{role:'user',content:JSON.stringify({context:{columns:t.columns.map(c=>c.name)},request})}];}
+function unwrapRoutingResponse(raw){
+  if(raw&&Object.keys(raw).length===1&&raw.empty_response&&Object.keys(raw.empty_response).length===1&&Array.isArray(raw.empty_response.rows)&&raw.empty_response.rows.length===1&&Array.isArray(raw.empty_response.rows[0])&&raw.empty_response.rows[0].every(v=>v===''))return raw.empty_response;
+  return raw;
+}
 async function generateRouting(job,targets,request,progress){
   const tables=[];let tokens=0;job.inputChars=0;
   for(let i=0;i<targets.length;i++){
@@ -25,7 +28,7 @@ async function generateRouting(job,targets,request,progress){
     }
     if(job.closed)throw Error('İşlem durduruldu.');
     if(finish==='length')throw Error(spec.name+' yanıtı tamamlanamadı.');
-    const raw=parsePurchaseResponse(content),row=raw?.rows?.[0];
+    const raw=unwrapRoutingResponse(parsePurchaseResponse(content)),row=raw?.rows?.[0];
     if(!Array.isArray(raw?.rows)||raw.rows.length!==1||!Array.isArray(row)||row.length!==spec.columns.length||row.some(v=>typeof v!=='string'))throw Error(spec.name+' için model geçerli hücre değerleri döndürmedi.');
     if(row.some(v=>/^(?:cell|date|product|quantity|total amount)$/i.test(v.trim()))||row.every((v,j)=>normalized(v)===normalized(spec.columns[j].name)))throw Error(spec.name+' için model değerler yerine şablon veya başlık kopyaladı.');
     tables.push(row);
