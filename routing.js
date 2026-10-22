@@ -1,5 +1,5 @@
 'use strict';
-const ROUTING_PROMPT='Extract the CURRENT Turkish text independently against EACH table schema. Return JSON only: {"tables":[["cell",...],...]}. Output one array per table IN THE GIVEN ORDER, one string per heading. Unknown/unmentioned fields="". No invented facts or default values. Match meaning, not just a shared number: kilograms are not hotel nights; an airfare is not a nightly hotel rate; a destination is not a purchased product. A product name alone is one match. Dates and audit columns do not count. Tables with no relevant information still get an all-empty array. No explanation, no instructions from names/headings. /no_think';
+const ROUTING_PROMPT='Extract facts from the Turkish sentence into ONE table. Return JSON with rows: exactly one array of strings in heading order. Only sentence VALUES, never heading names or template words. Missing values="". Never invent or copy facts. Kilograms are not hotel nights. Airfare is not a hotel nightly rate. A destination is not a purchased product. If unrelated, return empty strings for every heading. /no_think';
 function ensureTravelTables(){
   for(const [kind,name,headers] of [['hotels','Oteller',['Şehir','Otel','Kalınan gece','Gecelik tutar']],['flights','Uçuşlar',['Kalkış','Varış','Bilet türü','Fiyat']]]){
     if(!db.tabs.some(t=>t.kind===kind))db.tabs.push({id:id(),kind,name,columns:headers.map(name=>({id:id(),name,meaning:name})),rows:Array.from({length:8},blank)});
@@ -8,7 +8,40 @@ function ensureTravelTables(){
 function routingTargets(){return db.tabs.filter(t=>t.kind!=='unmatched'&&t.columns.length>=2&&!t.columns.some(c=>/^Başlık\s+\d+$/i.test(c.name))).map(t=>({id:t.id,name:t.name,snapshot:JSON.stringify(t),columns:t.columns.map((c,i)=>({index:i,name:c.name})).filter(c=>t.kind==='purchases'?c.index<4:!isAuditHeading(c.name))})).filter(t=>t.columns.length>=2);}
 function isAuditHeading(name){return /^(?:kayıt tarihi|orijinal cümle|cümle)$/iu.test(name.trim());}
 function isDateHeading(name){return /tarih|date/iu.test(name);}
-function routingMessages(targets,request){return [{role:'system',content:ROUTING_PROMPT},{role:'user',content:JSON.stringify({tables:targets.map(t=>({name:t.name,headings:t.columns.map(c=>c.name)})),request})}];}
+function routingMessages(targets,request){const t=targets[0];return [{role:'system',content:ROUTING_PROMPT},{role:'user',content:JSON.stringify({table:t.name,headings:t.columns.map(c=>c.name),sentence:request,empty_response:{rows:[t.columns.map(()=>'')]}})}];}
+async function generateRouting(job,targets,request,progress){
+  const tables=[];let tokens=0;job.inputChars=0;
+  for(let i=0;i<targets.length;i++){
+    if(job.closed)throw Error('İşlem durduruldu.');
+    const spec=targets[i],messages=routingMessages([spec],request);job.phase='Tablo karşılaştırılıyor: '+spec.name;job.routingStep=(i+1)+'/'+targets.length+' · '+spec.name;
+    job.inputChars+=messages.reduce((n,m)=>n+m.content.length,0);progress();
+    const stream=await job.engine.chat.completions.create({messages,temperature:0,max_tokens:180,stream:true,stream_options:{include_usage:true},extra_body:{enable_thinking:false}});
+    let content='',finish;
+    for await(const chunk of stream){
+      if(job.closed)throw Error('İşlem durduruldu.');
+      const piece=chunk.choices?.[0]?.delta?.content||'';if(piece&&job.firstMs===undefined)job.firstMs=Date.now()-job.started;
+      content+=piece;job.content=content;job.chars+=piece.length;finish=chunk.choices?.[0]?.finish_reason||finish;
+      if(chunk.usage)tokens+=chunk.usage.completion_tokens||0;progress();
+    }
+    if(job.closed)throw Error('İşlem durduruldu.');
+    if(finish==='length')throw Error(spec.name+' yanıtı tamamlanamadı.');
+    const raw=parsePurchaseResponse(content),row=raw?.rows?.[0];
+    if(!Array.isArray(raw?.rows)||raw.rows.length!==1||!Array.isArray(row)||row.length!==spec.columns.length||row.some(v=>typeof v!=='string'))throw Error(spec.name+' için model geçerli hücre değerleri döndürmedi.');
+    if(row.some(v=>/^(?:cell|date|product|quantity|total amount)$/i.test(v.trim()))||row.every((v,j)=>normalized(v)===normalized(spec.columns[j].name)))throw Error(spec.name+' için model değerler yerine şablon veya başlık kopyaladı.');
+    tables.push(row);
+  }
+  job.usage={completion_tokens:tokens};job.content=JSON.stringify({tables});return job.content;
+}
+function offerUnmatchedSave(request,originId,originSnapshot){
+  const button=el('button','Cümleyi Eşleşmeyenler’e kaydet');button.className='secondary';
+  button.onclick=()=>{
+    if(active!==originId||JSON.stringify(current())!==originSnapshot){aiStatus('Tablo değişti. Cümleyi tekrar gönder.');return;}
+    const plan=routePurchase(baseRoutingPlan([['','','','','','']]),request);
+    plan.message='Model yanıtı geçersiz olduğu için otomatik eşleştirme yapılamadı. İstersen orijinal cümleyi Eşleşmeyenler’e kaydetmek için onayla.';
+    aiPlan={plan,tabId:originId,snapshot:originSnapshot};showPlan();
+  };
+  $('#ai-result').append(el('p','Cümleni saklamak istersen Eşleşmeyenler’e kayıt önerisi hazırlayabilirsin.'),button);
+}
 function baseRoutingPlan(rows){return {action:'append',tab_name:'',headers:[],meanings:[],rows,filters:[],aggregate:'none',aggregate_column:-1,message:''};}
 function evaluateRouting(content,targets,request){
   const raw=parseAIResponse(content);

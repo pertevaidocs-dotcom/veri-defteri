@@ -182,7 +182,7 @@ $('#ai-run').onclick=async()=>{
     const local=new Date(),today=`${local.getFullYear()}-${String(local.getMonth()+1).padStart(2,'0')}-${String(local.getDate()).padStart(2,'0')}`;
     const context={today,sheet:t.name,columns:t.columns.map((c,i)=>({index:i,title:c.name,meaning:c.meaning||''})),example_rows:examples};
     if(JSON.stringify(context).length>4500)throw Error('Bu ilk deneme için tablo bağlamı çok büyük. Daha az sütunla dene.');
-    function progress(){if(job.closed)return;const seconds=Math.floor((Date.now()-job.started)/1000);aiStatus(job.chars?`Model yanıt üretiyor · ${seconds} sn · ${job.chars} karakter alındı`:`Model cümleyi okuyor · ${seconds} sn · Henüz yanıt gelmedi`);}
+    function progress(){if(job.closed)return;if(job.routingStep){aiStatus('Tablolar karşılaştırılıyor · '+job.routingStep+' · '+Math.floor((Date.now()-job.started)/1000)+' sn');return;}const seconds=Math.floor((Date.now()-job.started)/1000);aiStatus(job.chars?`Model yanıt üretiyor · ${seconds} sn · ${job.chars} karakter alındı`:`Model cümleyi okuyor · ${seconds} sn · Henüz yanıt gelmedi`);}
     progress();ticker=setInterval(progress,1000);
     const cancelled=new Promise((_,reject)=>{
       aiStopRequest=reason=>{
@@ -193,7 +193,7 @@ $('#ai-run').onclick=async()=>{
       };
       deadline=setTimeout(()=>aiStopRequest?.(diagnostic?'Kısa hız testi 30 saniyede tamamlanamadı.':'Model 90 saniyede tamamlayamadığı için işlem durduruldu.'),diagnostic?30000:90000);
     });
-    const generation=(async()=>{
+    const generation=(async()=>{if(autoTargets)return generateRouting(job,autoTargets,originalRequest,progress);
       const shape={action:'create_tab|append|query|clarify',tab_name:'',headers:[],meanings:[],rows:[],filters:[],aggregate:'none',aggregate_column:-1,message:''};
       const shortEntry=entryMode&&t.kind!=='purchases'&&Boolean($('#ai-short').checked)&&knownColumns(t);job.shortEntry=shortEntry;
       const examplesForEntry=!shortEntry&&entryMode&&genericSchema(t)&&t.columns.length===4&&!examples.length?[{role:'user',content:'Ayşe’ye 2 kilo armudu toplam 120 TL’ye sattım.'},{role:'assistant',content:JSON.stringify({rows:[['Ayşe','armut','2 kilo','120 TL']],meanings:['Müşteri','Ürün','Miktar','Toplam tutar']})}]:[];
@@ -220,7 +220,7 @@ $('#ai-run').onclick=async()=>{
   }catch(e){
     job.errorName=e.name||"Error";job.errorStack=String(e.stack||e.message).slice(0,6000);job.fatal=/disposed|deleted object|Tokenizer\*|device.lost|device.hung|GrammarMatcher/i.test(e.message||"");
     if(diagnostic||job.fatal||!job.content)showSpeedReport(job,'',e.message);else showRejectedResponse(job.content,e.message);
-    console.error(e);
+    if(autoTargets&&!job.fatal&&!job.closed)offerUnmatchedSave(originalRequest,tabId,snapshot);console.error(e);
     if(job.fatal){aiNeedsReload=true;aiEngine=null;aiStatus('Model motoru durdu. Tablo kayıtları değiştirilmedi. Tarayıcıyı tamamen kapatıp yeniden aç. Ayrıntı: '+e.message);}
     else aiStatus('İşlem tamamlanamadı: '+e.message);
   }finally{
@@ -243,7 +243,7 @@ function checkProbe(content){const clean=String(content).replace(/<think>[\s\S]*
 function showSpeedReport(job,content,result){
   const info=aiAdapter?.info||{},box=$('#ai-result');box.replaceChildren();box.hidden=false;openOutput(job.diagnostic===false?'Model hata raporu':'Model testi');
   box.append(el('p',job.diagnostic===false?'Model işlemi tamamlanamadı. Hiçbir kayıt değiştirilmedi. Hata ayrıntılarını aşağıdan kopyalayabilirsin.':'Kısa model testi · Tablo ve uzun yönerge kullanılmadı. Bu test kayıt eklemez.'));
-  const pre=el('pre',JSON.stringify({uygulama:'0.6.0',calisma_ayarlari:aiRuntimeOptions||null,gpu_olaylari:globalThis.VeriModelDiagnostics||[],asama:job.phase||'Bilinmiyor',hata_turu:job.errorName||null,hata_izi:job.errorStack||null,motor_yeniden_baslatilmali:Boolean(job.fatal)||aiNeedsReload,shader_f16:aiAdapter?.features?.has('shader-f16')??null,gpu_sinirlari:{maxBufferSize:aiAdapter?.limits?.maxBufferSize??null,maxStorageBufferBindingSize:aiAdapter?.limits?.maxStorageBufferBindingSize??null},sonuc:result,motor:'0.2.82',model:job.model||'Ölçülemedi',beklenen_yanit:job.diagnostic===false?null:'OK',yanit_dogrulandi:checkProbe(content),tarayici:navigator.userAgent||'Bilinmiyor',gpu:info.description||info.vendor||'Tarayıcı paylaşmadı',ilk_yanit_saniye:job.firstMs===undefined?'Yanıt gelmedi':Math.round(job.firstMs/100)/10,toplam_saniye:Math.round((Date.now()-job.started)/100)/10,alinan_karakter:job.chars,uretilen_token:job.usage?.completion_tokens??'Ölçülemedi',model_yaniti:content.slice(0,200)},null,2));
+  const pre=el('pre',JSON.stringify({uygulama:'0.6.1',calisma_ayarlari:aiRuntimeOptions||null,gpu_olaylari:globalThis.VeriModelDiagnostics||[],asama:job.phase||'Bilinmiyor',hata_turu:job.errorName||null,hata_izi:job.errorStack||null,motor_yeniden_baslatilmali:Boolean(job.fatal)||aiNeedsReload,shader_f16:aiAdapter?.features?.has('shader-f16')??null,gpu_sinirlari:{maxBufferSize:aiAdapter?.limits?.maxBufferSize??null,maxStorageBufferBindingSize:aiAdapter?.limits?.maxStorageBufferBindingSize??null},sonuc:result,motor:'0.2.82',model:job.model||'Ölçülemedi',beklenen_yanit:job.diagnostic===false?null:'OK',yanit_dogrulandi:checkProbe(content),tarayici:navigator.userAgent||'Bilinmiyor',gpu:info.description||info.vendor||'Tarayıcı paylaşmadı',ilk_yanit_saniye:job.firstMs===undefined?'Yanıt gelmedi':Math.round(job.firstMs/100)/10,toplam_saniye:Math.round((Date.now()-job.started)/100)/10,alinan_karakter:job.chars,uretilen_token:job.usage?.completion_tokens??'Ölçülemedi',model_yaniti:content.slice(0,200)},null,2));
   box.append(pre);
 }
 $('#ai-test').onclick=()=>{if(aiBusy)return;aiDiagnosticRequested=true;return $('#ai-run').onclick();};
