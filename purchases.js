@@ -34,8 +34,9 @@ function purchaseRows(raw,request,now=new Date()){
   // Only accept product words grounded in the current request, never a previous row.
   if(row[1]&&!source.includes(sourceText(row[1]).trim()))row[1]='';
   if(/^(?:gitti|aldı|aldim|aldım|markete?|mağaza|dükkan)$/iu.test(row[1]))row[1]='';
-  const quantities=[...request.matchAll(/\b\d+(?:[.,]\d+)?\s*(?:kg|kilo(?:gram)?|gram|gr|adet|tane|litre|lt|paket|kutu|şişe|çuval|metre)\b/giu)].map(m=>m[0]);
-  if(row[2]){const number=row[2].match(/\d+(?:[.,]\d+)?/);if(!number)row[2]='';else{const unit=quantities.find(q=>numeric(q.match(/\d+(?:[.,]\d+)?/)[0])===numeric(number[0]));if(unit)row[2]=unit;else if(!source.includes(sourceText(row[2]).trim())||monetaryEvidence(request).numbers.includes(numeric(number[0])))row[2]='';}}
+  const quantities=countedUnits(request,'kg|kilo(?:gram)?|gram|gr|adet|tane|litre|lt|paket|kutu|şişe|çuval|metre');
+  if(quantities.length===1)row[2]=quantities[0].text;
+  else if(row[2]){const number=row[2].match(/\d+(?:[.,]\d+)?/),unit=number?quantities.find(q=>q.value===numeric(number[0])):quantities.find(q=>sourceText(q.source).trim()===sourceText(row[2]).trim());if(unit)row[2]=unit.text;else if(!source.includes(sourceText(row[2]).trim())||!number)row[2]='';}
   if(row[3]){const amount=numeric(row[3].replace(/[^\d.,-]/g,''));if(amount===null||!monetaryEvidence(request).numbers.includes(amount))row[3]='';}
   return {rows:[[date.value,row[1],row[2],row[3],localDay(now),request]],purchaseExplicitDate:date.explicit};
 }
@@ -45,3 +46,18 @@ function routePurchase(plan,request){
   const inbox=db.tabs.find(t=>t.kind==='unmatched');
   return {...plan,action:'create_tab',tab_name:inbox?.name||'Eşleşmeyenler',headers:['Kayıt tarihi','Cümle'],meanings:['Kayıt tarihi','Cümle'],rows:[[localDay(),request]],audit:true,destinationId:inbox?.id||null,unmatched:true,message:'Ürün, miktar ve tutardan en az iki alan eşleşmedi. Cümlenin tamamı Eşleşmeyenler’e kaydedilecek.'};
 }
+
+function turkishCount(text){
+ const words=sourceText(text).trim().split(/\s+/),ones=['sifir','bir','iki','uc','dort','bes','alti','yedi','sekiz','dokuz'],tens=['on','yirmi','otuz','kirk','elli','altmis','yetmis','seksen','doksan'];
+ if(words.length===1&&words[0]==='yarim')return 0.5;
+ let half=0;if(words.at(-1)==='bucuk'){half=0.5;words.pop();}
+ const small=t=>{if(!t.length)return 0;if(t.length===1){if(ones.includes(t[0]))return ones.indexOf(t[0]);if(tens.includes(t[0]))return (tens.indexOf(t[0])+1)*10;}if(t.length===2&&tens.includes(t[0])&&ones.indexOf(t[1])>0)return (tens.indexOf(t[0])+1)*10+ones.indexOf(t[1]);return null;};
+ const group=t=>{const i=t.indexOf('yuz');if(i<0)return small(t);if(t.lastIndexOf('yuz')!==i||i>1)return null;const prefix=i===0?1:ones.indexOf(t[0]),tail=small(t.slice(i+1));return prefix>0&&tail!==null?prefix*100+tail:null;};
+ if(!words.length)return null;const k=words.indexOf('bin');let value;if(k<0)value=group(words);else{if(words.lastIndexOf('bin')!==k)return null;const high=k===0?1:group(words.slice(0,k)),low=group(words.slice(k+1));value=high>0&&low!==null?high*1000+low:null;}return value===null?null:value+half;
+}
+function countedUnits(request,units){
+ const word='(?:sıfır|sifir|bir|iki|üç|uc|dört|dort|beş|bes|altı|alti|yedi|sekiz|dokuz|on|yirmi|otuz|kırk|kirk|elli|altmış|altmis|yetmiş|yetmis|seksen|doksan|yüz|yuz|bin|yarım|yarim|buçuk|bucuk)';
+ const expression=new RegExp('(?:^|[^\\p{L}\\p{N}])((?:\\d+(?:[.,]\\d+)?|'+word+'(?:\\s+'+word+')*)\\s*('+units+'))(?=$|[^\\p{L}])','giu');
+ const result=[];for(const match of request.matchAll(expression)){const unit=match[2],amount=match[1].slice(0,match[1].length-unit.length).trim(),value=/^\d/.test(amount)?numeric(amount):turkishCount(amount);if(value!==null)result.push({value,unit,text:String(value).replace('.',',')+' '+unit,source:match[1]});}return result;
+}
+function nightQuantity(request){return countedUnits(request,'gece')[0]?.text||'';}

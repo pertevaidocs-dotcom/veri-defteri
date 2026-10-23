@@ -62,10 +62,10 @@ function evaluateRouting(content,targets,request){
  const values=raw.tables[0];if(!Array.isArray(values)||values.length!==spec.columns.length||values.some(v=>typeof v!=='string'||v.length>2000))throw Error('Model hücreleri eşleştiremedi.');
  const row=Array(t.columns.length).fill(''),source=sourceText(request),money=monetaryEvidence(request),numbers=[...request.matchAll(/\d+(?:[.,]\d+)*/g)].map(m=>numeric(m[0]));
  spec.columns.forEach((c,j)=>{let value=values[j].trim();if(!value)return;const number=value.match(/\d+(?:[.,]\d+)*/)?.[0],moneyField=/tutar|fiyat|price|amount/iu.test(c.name);if(/\d.*(?:TL|TRY|₺|lira|dolar|USD|EUR|euro|€|GBP|sterlin)/iu.test(value)&&!moneyField)return;if(/şehir|otel|kalkış|varış|bilet türü/iu.test(c.name)&&!moneyField&&number!==undefined&&!/\p{L}/u.test(value))return;if(moneyField){if(number===undefined||!money.numbers.includes(numeric(number)))return;}else if(!source.includes(sourceText(value).trim())&&(number===undefined||!numbers.includes(numeric(number))))return;
- if(/gece/iu.test(c.name)&&!moneyField){value=request.match(/\b\d+(?:[.,]\d+)?\s*gece\b/iu)?.[0]||'';}
+ if(/gece/iu.test(c.name)&&!moneyField){value=nightQuantity(request);}
  row[c.index]=value;});
  // Recover explicit unit-tagged hotel data when a small model swapped columns.
- if(t.kind==='hotels')spec.columns.forEach(c=>{if(/gece/iu.test(c.name)&&!/gecelik/iu.test(c.name))row[c.index]=request.match(/\b\d+(?:[.,]\d+)?\s*gece\b/iu)?.[0]||'';if(/gecelik/iu.test(c.name)){const explicit=request.match(/(?:gecelik|geceliği|gece başına|gecesi|geceye)\s*(\d+(?:[.,]\d+)*\s*(?:TL|TRY|₺|lira|dolar|USD|EUR|euro|€|GBP|sterlin))/iu)?.[1];if(explicit)row[c.index]=explicit;}});
+ if(t.kind==='hotels')spec.columns.forEach(c=>{if(/gece/iu.test(c.name)&&!/gecelik/iu.test(c.name))row[c.index]=nightQuantity(request);if(/gecelik/iu.test(c.name)){const explicit=request.match(/(?:gecelik|geceliği|gece başına|gecesi|geceye)\s*(\d+(?:[.,]\d+)*\s*(?:TL|TRY|₺|lira|dolar|USD|EUR|euro|€|GBP|sterlin))/iu)?.[1];if(explicit)row[c.index]=explicit;}});
  let plan=baseRoutingPlan([row]);if(t.kind==='purchases'){const read=name=>row[t.columns.findIndex(c=>c.name===name)]||'';plan.rows=purchaseRows({rows:[['',read('Ürün'),read('Miktar'),read('Tutar')]]},request).rows;}
  const warnings=removeUnsupportedFacts(plan,t,request),matched=spec.columns.filter(c=>plan.rows[0][c.index]?.trim());if(matched.length<2)return [];fillEntryMetadata(plan,t,request);validatePlan(plan,t);return [{spec,plan,warnings,count:matched.length,matched:matched.map(c=>c.name)}];
 }

@@ -1,5 +1,5 @@
-const CACHE='veri-defteri-shell-v7-0';
-const SHELL=['./','./index.html','./routing.js?v=0700','./purchases.js?v=0700','./app.js?v=0700','./style.css?v=0700','./manifest.webmanifest','./icon.svg','./ai.js?v=0700','./webllm-local.js?v=0700'];
+const CACHE='veri-defteri-shell-v7-1';
+const SHELL=['./','./index.html','./routing.js?v=0701','./purchases.js?v=0701','./app.js?v=0701','./style.css?v=0701','./manifest.webmanifest','./icon.svg','./ai.js?v=0701','./webllm-local.js?v=0701'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('veri-defteri-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{
