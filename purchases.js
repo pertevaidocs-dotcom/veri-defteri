@@ -43,5 +43,5 @@ function routePurchase(plan,request){
   const matched=plan.rows[0].slice(1,4).filter(v=>v.trim()).length;
   if(matched>=2){plan.message='Alışveriş önerisi hazır. Ürün, miktar ve tutardan '+matched+' alan eşleşti. Tarih bu sayıya dahil değil.';plan.purchase=true;return plan;}
   const inbox=db.tabs.find(t=>t.kind==='unmatched');
-  return {...plan,action:'create_tab',tab_name:inbox?.name||'Eşleşmeyenler',headers:['Cümle'],meanings:['Cümle'],rows:[[request]],destinationId:inbox?.id||null,unmatched:true,message:'Ürün, miktar ve tutardan en az iki alan eşleşmedi. Cümlenin tamamı Eşleşmeyenler’e kaydedilecek.'};
+  return {...plan,action:'create_tab',tab_name:inbox?.name||'Eşleşmeyenler',headers:['Kayıt tarihi','Cümle'],meanings:['Kayıt tarihi','Cümle'],rows:[[localDay(),request]],audit:true,destinationId:inbox?.id||null,unmatched:true,message:'Ürün, miktar ve tutardan en az iki alan eşleşmedi. Cümlenin tamamı Eşleşmeyenler’e kaydedilecek.'};
 }
