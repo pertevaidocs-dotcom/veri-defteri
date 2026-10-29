@@ -1,5 +1,5 @@
-const CACHE='veri-defteri-text-v1-1-1';
-const SHELL=['./','./index.html','./notes.css?v=1101','./notes-core.js?v=1101','./notes.js?v=1101','./gemini-link.js?v=1101','./manifest.webmanifest','./icon.svg'];
+const CACHE='veri-defteri-text-v1-2-0';
+const SHELL=['./','./index.html','./notes.css?v=1200','./notes-core.js?v=1200','./notes.js?v=1200','./gemini-link.js?v=1200','./manifest.webmanifest','./icon.svg'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>(k.startsWith('veri-defteri-shell-')||k.startsWith('veri-defteri-text-'))&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET'||new URL(e.request.url).origin!==self.location.origin)return;if(e.request.mode==='navigate'){const path=new URL(e.request.url).pathname,base=new URL('./',self.location.href).pathname;if(path!==base&&path!==base+'index.html')return;e.respondWith(fetch(e.request,{cache:'no-cache'}).then(response=>{if(!response.ok)throw Error('Navigation failed');const copy=response.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put('./index.html',copy)));return response;}).catch(()=>caches.match('./index.html').then(hit=>hit||caches.match('./'))));}else e.respondWith(caches.match(e.request).then(hit=>hit||fetch(e.request)));});
